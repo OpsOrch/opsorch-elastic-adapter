@@ -57,12 +57,31 @@ make integ   # run integration tests
 
 ## CI/CD
 
-The project includes GitHub Actions workflows for continuous integration:
+The repository includes GitHub Actions workflows for continuous integration and release:
 
-- **Test Job**: Runs unit tests on Go 1.21 and 1.22
-- **Lint Job**: Checks code formatting with gofmt, runs go vet, and staticcheck
+- **CI** (`ci.yml`): Runs tests and linting on every push/PR to main
+  - Test Job: Runs unit tests on Go 1.21 and 1.22  
+  - Lint Job: Checks code formatting with gofmt, runs go vet, and staticcheck
+- **Release** (`release.yml`): Manual workflow that:
+  - Runs tests and linting
+  - Creates version tags (patch/minor/major)
+  - Builds multi-arch binaries (linux-amd64, linux-arm64, darwin-amd64, darwin-arm64)
+  - Publishes binaries as GitHub release assets
 
-See [.github/workflows/ci.yml](.github/workflows/ci.yml) for the full configuration.
+### Pre-Built Binaries
+
+Download pre-built plugin binaries from [GitHub Releases](https://github.com/opsorch/opsorch-elastic-adapter/releases):
+
+```dockerfile
+# Use in custom Docker images
+FROM ghcr.io/opsorch/opsorch-core:latest
+WORKDIR /opt/opsorch
+
+ADD https://github.com/opsorch/opsorch-elastic-adapter/releases/download/v0.1.0/logplugin-linux-amd64 ./plugins/logplugin
+RUN chmod +x ./plugins/logplugin
+
+ENV OPSORCH_LOG_PLUGIN=/opt/opsorch/plugins/logplugin
+```
 
 ## Usage
 

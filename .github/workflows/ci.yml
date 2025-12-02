@@ -9,9 +9,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: opsorch-elastic-adapter
     strategy:
       matrix:
         go-version: ["1.21", "1.22"]
@@ -32,21 +29,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          path: opsorch-elastic-adapter
-
-      - name: Checkout opsorch-core (local replace target)
-        uses: actions/checkout@v4
-        with:
-          repository: opsorch/opsorch-core
-          path: opsorch-core
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
           cache: true
-          cache-dependency-path: opsorch-elastic-adapter/go.sum
+
+      - name: Remove local replace directive
+        run: |
+          go mod edit -dropreplace github.com/opsorch/opsorch-core
+          go mod tidy
 
       - name: Run unit tests
         run: make test
@@ -59,27 +52,20 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: opsorch-elastic-adapter
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          path: opsorch-elastic-adapter
-
-      - name: Checkout opsorch-core (local replace target)
-        uses: actions/checkout@v4
-        with:
-          repository: opsorch/opsorch-core
-          path: opsorch-core
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
           cache: true
-          cache-dependency-path: opsorch-elastic-adapter/go.sum
+
+      - name: Remove local replace directive
+        run: |
+          go mod edit -dropreplace github.com/opsorch/opsorch-core
+          go mod tidy
 
       - name: Check formatting
         run: |
