@@ -76,7 +76,12 @@ func main() {
 			fmt.Printf("  Service: %s\n", results.Entries[0].Service)
 		}
 		fmt.Printf("Kibana URL: %s\n", results.URL)
-		testResult("Query with time range", nil)
+		// Validate URL
+		if results.URL == "" {
+			testResult("Query with time range (URL validation)", fmt.Errorf("expected Kibana URL in results"))
+		} else {
+			testResult("Query with time range", nil)
+		}
 	}
 
 	// Test 3: Query with full-text search
@@ -95,6 +100,9 @@ func main() {
 		fmt.Printf("Found %d entries matching 'error OR warning'\n", len(results.Entries))
 		for i, entry := range results.Entries {
 			fmt.Printf("  [%d] %s: %s\n", i+1, entry.Timestamp.Format("15:04:05"), truncate(entry.Message, 60))
+		}
+		if results.URL != "" {
+			fmt.Printf("Kibana URL: %s\n", results.URL)
 		}
 		testResult("Query with full-text search", nil)
 	}
