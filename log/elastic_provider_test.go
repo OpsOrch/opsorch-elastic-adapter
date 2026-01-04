@@ -180,7 +180,7 @@ func TestNormalizeHit(t *testing.T) {
 		},
 	}
 
-	entry := p.normalizeHit(hit)
+	entry := normalizeHit(p, hit)
 
 	if entry.Message != "Test log message" {
 		t.Errorf("message = %s, want Test log message", entry.Message)
