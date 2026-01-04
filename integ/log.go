@@ -59,7 +59,7 @@ func main() {
 
 	// Test 2: Query with time range
 	fmt.Println("\n=== Test 2: Query Logs with Time Range ===")
-	entries, err := provider.Query(ctx, schema.LogQuery{
+	results, err := provider.Query(ctx, schema.LogQuery{
 		Start: time.Now().Add(-24 * time.Hour),
 		End:   time.Now(),
 		Limit: 10,
@@ -67,20 +67,26 @@ func main() {
 	if err != nil {
 		testResult("Query with time range", err)
 	} else {
-		fmt.Printf("Found %d log entries\n", len(entries))
-		if len(entries) > 0 {
+		fmt.Printf("Found %d log entries\n", len(results.Entries))
+		if len(results.Entries) > 0 {
 			fmt.Printf("Sample entry:\n")
-			fmt.Printf("  Timestamp: %s\n", entries[0].Timestamp.Format("2006-01-02 15:04:05"))
-			fmt.Printf("  Message: %s\n", truncate(entries[0].Message, 80))
-			fmt.Printf("  Severity: %s\n", entries[0].Severity)
-			fmt.Printf("  Service: %s\n", entries[0].Service)
+			fmt.Printf("  Timestamp: %s\n", results.Entries[0].Timestamp.Format("2006-01-02 15:04:05"))
+			fmt.Printf("  Message: %s\n", truncate(results.Entries[0].Message, 80))
+			fmt.Printf("  Severity: %s\n", results.Entries[0].Severity)
+			fmt.Printf("  Service: %s\n", results.Entries[0].Service)
 		}
-		testResult("Query with time range", nil)
+		fmt.Printf("Kibana URL: %s\n", results.URL)
+		// Validate URL
+		if results.URL == "" {
+			testResult("Query with time range (URL validation)", fmt.Errorf("expected Kibana URL in results"))
+		} else {
+			testResult("Query with time range", nil)
+		}
 	}
 
 	// Test 3: Query with full-text search
 	fmt.Println("\n=== Test 3: Query with Full-Text Search ===")
-	entries, err = provider.Query(ctx, schema.LogQuery{
+	results, err = provider.Query(ctx, schema.LogQuery{
 		Start: time.Now().Add(-24 * time.Hour),
 		End:   time.Now(),
 		Expression: &schema.LogExpression{
@@ -91,16 +97,19 @@ func main() {
 	if err != nil {
 		testResult("Query with full-text search", err)
 	} else {
-		fmt.Printf("Found %d entries matching 'error OR warning'\n", len(entries))
-		for i, entry := range entries {
+		fmt.Printf("Found %d entries matching 'error OR warning'\n", len(results.Entries))
+		for i, entry := range results.Entries {
 			fmt.Printf("  [%d] %s: %s\n", i+1, entry.Timestamp.Format("15:04:05"), truncate(entry.Message, 60))
+		}
+		if results.URL != "" {
+			fmt.Printf("Kibana URL: %s\n", results.URL)
 		}
 		testResult("Query with full-text search", nil)
 	}
 
 	// Test 4: Query with severity filter
 	fmt.Println("\n=== Test 4: Query by Severity ===")
-	entries, err = provider.Query(ctx, schema.LogQuery{
+	results, err = provider.Query(ctx, schema.LogQuery{
 		Start: time.Now().Add(-24 * time.Hour),
 		End:   time.Now(),
 		Expression: &schema.LogExpression{
@@ -111,9 +120,9 @@ func main() {
 	if err != nil {
 		testResult("Query by severity", err)
 	} else {
-		fmt.Printf("Found %d error/critical entries\n", len(entries))
+		fmt.Printf("Found %d error/critical entries\n", len(results.Entries))
 		allMatch := true
-		for _, entry := range entries {
+		for _, entry := range results.Entries {
 			if entry.Severity != "error" && entry.Severity != "critical" {
 				allMatch = false
 				testResult("Validate severity filter", fmt.Errorf("expected error/critical, got %s", entry.Severity))
@@ -127,7 +136,7 @@ func main() {
 
 	// Test 5: Query with structured filters
 	fmt.Println("\n=== Test 5: Query with Structured Filters ===")
-	entries, err = provider.Query(ctx, schema.LogQuery{
+	results, err = provider.Query(ctx, schema.LogQuery{
 		Start: time.Now().Add(-24 * time.Hour),
 		End:   time.Now(),
 		Expression: &schema.LogExpression{
@@ -143,20 +152,20 @@ func main() {
 	})
 	if err != nil {
 		// It's ok if no results, as long as query syntax is correct
-		if len(entries) == 0 {
+		if len(results.Entries) == 0 {
 			fmt.Println("No entries found for service=api-gateway (expected if not in dataset)")
 			testResult("Query with structured filters", nil)
 		} else {
 			testResult("Query with structured filters", err)
 		}
 	} else {
-		fmt.Printf("Found %d entries for service=api-gateway\n", len(entries))
+		fmt.Printf("Found %d entries for service=api-gateway\n", len(results.Entries))
 		testResult("Query with structured filters", nil)
 	}
 
 	// Test 6: Query with scope filters
 	fmt.Println("\n=== Test 6: Query with Scope Filters ===")
-	entries, err = provider.Query(ctx, schema.LogQuery{
+	results, err = provider.Query(ctx, schema.LogQuery{
 		Start: time.Now().Add(-1 * time.Hour),
 		End:   time.Now(),
 		Scope: schema.QueryScope{
@@ -166,20 +175,20 @@ func main() {
 	})
 	if err != nil {
 		// It's ok if no results
-		if len(entries) == 0 {
+		if len(results.Entries) == 0 {
 			fmt.Println("No entries found for environment=production (expected if not in dataset)")
 			testResult("Query with scope filters", nil)
 		} else {
 			testResult("Query with scope filters", err)
 		}
 	} else {
-		fmt.Printf("Found %d entries in production environment\n", len(entries))
+		fmt.Printf("Found %d entries in production environment\n", len(results.Entries))
 		testResult("Query with scope filters", nil)
 	}
 
 	// Test 7: Query with limit
 	fmt.Println("\n=== Test 7: Query with Limit ===")
-	entries, err = provider.Query(ctx, schema.LogQuery{
+	results, err = provider.Query(ctx, schema.LogQuery{
 		Start: time.Now().Add(-24 * time.Hour),
 		End:   time.Now(),
 		Limit: 3,
@@ -187,17 +196,17 @@ func main() {
 	if err != nil {
 		testResult("Query with limit", err)
 	} else {
-		if len(entries) <= 3 {
-			fmt.Printf("Correctly limited to %d entries\n", len(entries))
+		if len(results.Entries) <= 3 {
+			fmt.Printf("Correctly limited to %d entries\n", len(results.Entries))
 			testResult("Query with limit", nil)
 		} else {
-			testResult("Query with limit", fmt.Errorf("expected max 3 entries, got %d", len(entries)))
+			testResult("Query with limit", fmt.Errorf("expected max 3 entries, got %d", len(results.Entries)))
 		}
 	}
 
 	// Test 8: Query with combined filters
 	fmt.Println("\n=== Test 8: Query with Combined Filters ===")
-	entries, err = provider.Query(ctx, schema.LogQuery{
+	results, err = provider.Query(ctx, schema.LogQuery{
 		Start: time.Now().Add(-24 * time.Hour),
 		End:   time.Now(),
 		Expression: &schema.LogExpression{
@@ -209,24 +218,24 @@ func main() {
 	if err != nil {
 		testResult("Query with combined filters", err)
 	} else {
-		fmt.Printf("Found %d entries (search='error' AND severity in [error,warning])\n", len(entries))
+		fmt.Printf("Found %d entries (search='error' AND severity in [error,warning])\n", len(results.Entries))
 		testResult("Query with combined filters", nil)
 	}
 
 	// Test 9: Validate result normalization
 	fmt.Println("\n=== Test 9: Validate Result Normalization ===")
-	entries, err = provider.Query(ctx, schema.LogQuery{
+	results, err = provider.Query(ctx, schema.LogQuery{
 		Start: time.Now().Add(-1 * time.Hour),
 		End:   time.Now(),
 		Limit: 1,
 	})
 	if err != nil {
 		testResult("Validate result normalization", err)
-	} else if len(entries) == 0 {
+	} else if len(results.Entries) == 0 {
 		fmt.Println("No entries to validate (empty result set)")
 		testResult("Validate result normalization", nil)
 	} else {
-		entry := entries[0]
+		entry := results.Entries[0]
 		hasTimestamp := !entry.Timestamp.IsZero()
 		hasMetadata := entry.Metadata != nil && len(entry.Metadata) > 0
 

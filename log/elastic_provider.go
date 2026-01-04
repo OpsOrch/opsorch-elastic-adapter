@@ -34,8 +34,9 @@ type Config struct {
 
 // ElasticProvider implements the log.Provider interface for Elasticsearch.
 type ElasticProvider struct {
-	cfg    Config
-	client *elasticsearch.Client
+	cfg     Config
+	client  *elasticsearch.Client
+	baseURL string
 }
 
 // New constructs the provider from decrypted config.
@@ -76,9 +77,16 @@ func New(cfg map[string]any) (corelog.Provider, error) {
 		return nil, fmt.Errorf("failed to connect to Elasticsearch: %w", err)
 	}
 
+	// Extract base URL from first address or cloudID
+	baseURL := ""
+	if len(parsed.Addresses) > 0 {
+		baseURL = parsed.Addresses[0]
+	}
+
 	return &ElasticProvider{
-		cfg:    parsed,
-		client: client,
+		cfg:     parsed,
+		client:  client,
+		baseURL: baseURL,
 	}, nil
 }
 
@@ -87,14 +95,14 @@ func init() {
 }
 
 // Query executes a log query against Elasticsearch and returns normalized log entries.
-func (p *ElasticProvider) Query(ctx context.Context, query schema.LogQuery) ([]schema.LogEntry, error) {
+func (p *ElasticProvider) Query(ctx context.Context, query schema.LogQuery) (schema.LogEntries, error) {
 	// Build Elasticsearch query DSL
 	esQuery := p.buildQuery(query)
 
 	// Marshal to JSON
 	queryBody, err := json.Marshal(esQuery)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal query: %w", err)
+		return schema.LogEntries{}, fmt.Errorf("failed to marshal query: %w", err)
 	}
 
 	// Execute search
@@ -105,28 +113,34 @@ func (p *ElasticProvider) Query(ctx context.Context, query schema.LogQuery) ([]s
 		p.client.Search.WithTrackTotalHits(true),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("elasticsearch query failed: %w", err)
+		return schema.LogEntries{}, fmt.Errorf("elasticsearch query failed: %w", err)
 	}
 	defer res.Body.Close()
 
 	if res.IsError() {
-		return nil, fmt.Errorf("elasticsearch returned error: %s", res.String())
+		return schema.LogEntries{}, fmt.Errorf("elasticsearch returned error: %s", res.String())
 	}
 
 	// Parse response
 	var result esSearchResponse
 	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+		return schema.LogEntries{}, fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	// Normalize to schema.LogEntry
 	entries := make([]schema.LogEntry, 0, len(result.Hits.Hits))
 	for _, hit := range result.Hits.Hits {
-		entry := p.normalizeHit(hit)
+		entry := normalizeHit(p, hit)
 		entries = append(entries, entry)
 	}
 
-	return entries, nil
+	// Build URL to view logs in Kibana
+	kibanaURL := buildKibanaURL(p.baseURL, p.cfg.IndexPattern, query)
+
+	return schema.LogEntries{
+		Entries: entries,
+		URL:     kibanaURL,
+	}, nil
 }
 
 // buildQuery constructs an Elasticsearch query DSL from LogQuery.
@@ -273,7 +287,7 @@ func (p *ElasticProvider) buildFilterClause(filter schema.LogFilter) map[string]
 }
 
 // normalizeHit converts an Elasticsearch hit to a schema.LogEntry.
-func (p *ElasticProvider) normalizeHit(hit esHit) schema.LogEntry {
+func normalizeHit(p *ElasticProvider, hit esHit) schema.LogEntry {
 	source := hit.Source
 
 	entry := schema.LogEntry{
@@ -364,6 +378,66 @@ func parseConfig(cfg map[string]any) Config {
 	}
 
 	return out
+}
+
+// buildKibanaURL constructs a URL to view logs in Kibana Discover.
+func buildKibanaURL(baseURL, indexPattern string, query schema.LogQuery) string {
+	if baseURL == "" {
+		return ""
+	}
+
+	// Start with Kibana Discover
+	url := baseURL + "/app/kibana#/discover?_a="
+
+	// Build Kibana filter state
+	filters := []string{}
+
+	// Add time range filter
+	if !query.Start.IsZero() || !query.End.IsZero() {
+		// Kibana expects milliseconds
+		startMs := query.Start.UnixMilli()
+		endMs := query.End.UnixMilli()
+		filters = append(filters, fmt.Sprintf("(range:('@timestamp':(gte:%d,lte:%d)))", startMs, endMs))
+	}
+
+	// Add expression filters
+	if query.Expression != nil {
+		if query.Expression.Search != "" {
+			// Escape quotes in search term
+			searchTerm := strings.ReplaceAll(query.Expression.Search, "'", "\\'")
+			filters = append(filters, fmt.Sprintf("(query_string:(query:'%s'))", searchTerm))
+		}
+
+		for _, filter := range query.Expression.Filters {
+			if filter.Field != "" && filter.Value != "" {
+				value := strings.ReplaceAll(filter.Value, "'", "\\'")
+				switch filter.Operator {
+				case "=":
+					filters = append(filters, fmt.Sprintf("(match:('%s':(query:'%s',type:phrase)))", filter.Field, value))
+				case "contains":
+					filters = append(filters, fmt.Sprintf("(query_string:(query:'%s:*%s*'))", filter.Field, value))
+				}
+			}
+		}
+	}
+
+	// Add scope filters
+	if query.Scope.Service != "" {
+		filters = append(filters, fmt.Sprintf("(match:('service':(query:'%s',type:phrase)))", query.Scope.Service))
+	}
+	if query.Scope.Environment != "" {
+		filters = append(filters, fmt.Sprintf("(match:('environment':(query:'%s',type:phrase)))", query.Scope.Environment))
+	}
+
+	// Build the filter array
+	if len(filters) > 0 {
+		url += "(filters:!(" + strings.Join(filters, ",") + ")"
+	}
+
+	// Add index and sort
+	url += fmt.Sprintf(",index:'%s',sort:!('@timestamp',desc))", indexPattern)
+
+	return url
 }
 
 // Elasticsearch response types

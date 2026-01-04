@@ -180,7 +180,7 @@ func TestNormalizeHit(t *testing.T) {
 		},
 	}
 
-	entry := p.normalizeHit(hit)
+	entry := normalizeHit(p, hit)
 
 	if entry.Message != "Test log message" {
 		t.Errorf("message = %s, want Test log message", entry.Message)
@@ -200,4 +200,153 @@ func TestNormalizeHit(t *testing.T) {
 	if entry.Labels["environment"] != "production" {
 		t.Errorf("labels[environment] = %s, want production", entry.Labels["environment"])
 	}
+}
+
+func TestBuildKibanaURL(t *testing.T) {
+	tests := []struct {
+		name          string
+		baseURL       string
+		indexPattern  string
+		query         schema.LogQuery
+		expectURL     bool
+		shouldContain []string
+	}{
+		{
+			name:         "empty base URL",
+			baseURL:      "",
+			indexPattern: "logs-*",
+			query:        schema.LogQuery{},
+			expectURL:    false,
+		},
+		{
+			name:         "basic URL without filters",
+			baseURL:      "http://kibana:5601",
+			indexPattern: "logs-*",
+			query:        schema.LogQuery{},
+			expectURL:    true,
+			shouldContain: []string{
+				"http://kibana:5601/app/kibana#/discover",
+				"logs-*",
+			},
+		},
+		{
+			name:         "URL with search expression",
+			baseURL:      "http://kibana:5601",
+			indexPattern: "logs-app",
+			query: schema.LogQuery{
+				Expression: &schema.LogExpression{
+					Search: "error connection",
+				},
+			},
+			expectURL: true,
+			shouldContain: []string{
+				"error connection",
+				"logs-app",
+			},
+		},
+		{
+			name:         "URL with structured filter",
+			baseURL:      "http://kibana:5601",
+			indexPattern: "logs-*",
+			query: schema.LogQuery{
+				Expression: &schema.LogExpression{
+					Filters: []schema.LogFilter{
+						{
+							Field:    "service",
+							Operator: "=",
+							Value:    "api-gateway",
+						},
+					},
+				},
+			},
+			expectURL: true,
+			shouldContain: []string{
+				"api-gateway",
+				"logs-*",
+			},
+		},
+		{
+			name:         "URL with scope filter",
+			baseURL:      "http://kibana:5601",
+			indexPattern: "logs-*",
+			query: schema.LogQuery{
+				Scope: schema.QueryScope{
+					Service:     "api",
+					Environment: "production",
+				},
+			},
+			expectURL: true,
+			shouldContain: []string{
+				"api",
+				"production",
+				"logs-*",
+			},
+		},
+		{
+			name:         "URL with multiple filters",
+			baseURL:      "http://kibana:5601",
+			indexPattern: "logs-prod",
+			query: schema.LogQuery{
+				Expression: &schema.LogExpression{
+					Search: "error",
+					Filters: []schema.LogFilter{
+						{
+							Field:    "status",
+							Operator: "=",
+							Value:    "500",
+						},
+					},
+				},
+				Scope: schema.QueryScope{
+					Environment: "production",
+				},
+			},
+			expectURL: true,
+			shouldContain: []string{
+				"error",
+				"500",
+				"production",
+				"logs-prod",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url := buildKibanaURL(tt.baseURL, tt.indexPattern, tt.query)
+
+			if tt.expectURL && url == "" {
+				t.Errorf("expected URL, got empty string")
+			}
+			if !tt.expectURL && url != "" {
+				t.Errorf("expected empty URL, got %s", url)
+			}
+
+			for _, shouldContain := range tt.shouldContain {
+				if !contains(url, shouldContain) {
+					t.Errorf("URL should contain %q, got %s", shouldContain, url)
+				}
+			}
+		})
+	}
+}
+
+func contains(s, substr string) bool {
+	// Simple substring check
+	if len(substr) == 0 {
+		return true
+	}
+	return indexInString(s, substr) != -1
+}
+
+func indexInString(s, substr string) int {
+	if len(substr) == 0 {
+		return 0
+	}
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
 }
